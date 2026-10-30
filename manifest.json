@@ -1,0 +1,11 @@
+{
+  "id": "draw-on-notes",
+  "name": "Draw on Notes",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Draw and mark up right on top of your notes, margins included, with a pen, a highlighter and an eraser.",
+  "author": "Nexziz",
+  "isDesktopOnly": false,
+  "authorUrl": "https://github.com/Nexziz",
+  "fundingUrl": "https://buymeacoffee.com/nexsiz"
+}

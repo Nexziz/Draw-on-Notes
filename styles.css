@@ -1,0 +1,254 @@
+/* ---------------------------------------------------------------------------
+   The drawing layer, over the whole note
+   --------------------------------------------------------------------------- */
+
+.draw-on-notes-host {
+  position: relative;
+}
+
+.draw-on-notes-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.draw-on-notes-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Highlighter strokes blend with the page, so text under them stays crisp. */
+.theme-light .draw-on-notes-marker {
+  mix-blend-mode: multiply;
+}
+
+.theme-dark .draw-on-notes-marker {
+  mix-blend-mode: screen;
+}
+
+.draw-on-notes-layer.is-drawing .draw-on-notes-pen {
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.draw-on-notes-action.is-active {
+  color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+/* ---------------------------------------------------------------------------
+   Toolbar
+   --------------------------------------------------------------------------- */
+
+.draw-on-notes-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.draw-on-notes-button.is-active {
+  color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.draw-on-notes-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.draw-on-notes-done {
+  color: var(--interactive-accent);
+}
+
+.draw-on-notes-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--background-modifier-border);
+}
+
+.draw-on-notes-swatches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.draw-on-notes-swatch,
+.draw-on-notes-picker {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.draw-on-notes-swatch,
+.draw-on-notes-swatch:hover {
+  background: var(--draw-on-notes-swatch);
+}
+
+.draw-on-notes-swatch:hover,
+.draw-on-notes-picker:hover {
+  transform: scale(1.15);
+}
+
+.draw-on-notes-swatch.is-active,
+.draw-on-notes-picker.is-active {
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
+}
+
+/* The picker is a rainbow until it's the colour in use. */
+.draw-on-notes-picker {
+  overflow: hidden;
+  background: conic-gradient(#e03131, #fab005, #2f9e44, #1971c2, #7048e8, #e03131);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.draw-on-notes-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.draw-on-notes-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.draw-on-notes-picker:not(.is-active)::-webkit-color-swatch {
+  opacity: 0;
+}
+
+.draw-on-notes-slider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  color: var(--icon-color);
+}
+
+.draw-on-notes-slider-icon {
+  display: flex;
+}
+
+.draw-on-notes-slider-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.draw-on-notes-slider input[type='range'] {
+  width: 72px;
+}
+
+/* ---------------------------------------------------------------------------
+   Settings: a thank-you, with a button to buy the maker a coffee
+   --------------------------------------------------------------------------- */
+
+.draw-on-notes-support {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  padding: 12px 16px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.draw-on-notes-support-title {
+  font-weight: var(--font-semibold);
+}
+
+.draw-on-notes-support-desc {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.draw-on-notes-coffee {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: #1d1a12;
+  background: #ffdd00;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.draw-on-notes-coffee:hover {
+  color: #1d1a12;
+  text-decoration: none;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+.draw-on-notes-coffee:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.draw-on-notes-coffee-icon {
+  display: flex;
+}
+
+.draw-on-notes-coffee-icon .svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Settings: shortcuts
+   --------------------------------------------------------------------------- */
+
+.draw-on-notes-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px 16px;
+  padding: 8px 0;
+}
+
+.draw-on-notes-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-ui-small);
+}
+
+.draw-on-notes-key-row kbd {
+  min-width: 28px;
+  text-align: center;
+}
+
+.draw-on-notes-keys-note {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}

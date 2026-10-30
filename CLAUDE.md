@@ -8,6 +8,13 @@ The support link is https://buymeacoffee.com/nexsiz (spelled "nexsiz", unlike th
 - The top of the plugin's settings tab: a thank-you card ("Enjoying Draw on Notes?" plus one line) with a yellow `#ffdd00` pill button that has Obsidian's `coffee` icon and the text "Buy me a coffee", and opens the link in the browser. Pocket Watch (`nexziz/pocket-watch`, `.pocket-watch-support` and `.pocket-watch-coffee` in `styles.css`) is the model.
 - The "Support" section of `README.md`, with the shields.io badge.
 
-## Images
+## The plugin
 
-Screenshots and GIFs for the README live in `images/`. The README has commented-out spots for `images/hero.png`, `images/markup-demo.gif` and `images/pen-settings.gif`: when an image exists, add the file and uncomment its line.
+Plain JavaScript with no build step, like Pocket Watch: `main.js`, `styles.css` and `manifest.json` are what Obsidian loads. When releasing, bump the version in `manifest.json` and add it to `versions.json`.
+
+## Tests and images
+
+`dev/` has an Obsidian lookalike page that loads the real `main.js` and `styles.css` in Chromium. From `dev/`, after `npm install`:
+
+- `npm test` runs the checks in `test.js` (drawing, saving, undo, eraser, scrolling, settings). Run it after every change to the plugin.
+- `npm run images` records `images/hero.png`, `images/markup-demo.gif` and `images/pen-settings.gif` with `capture.js`. Rerun it when the toolbar or the look of the marks changes, and look at the results before committing.

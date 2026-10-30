@@ -1,0 +1,15 @@
+{
+  "name": "draw-on-notes-dev",
+  "private": true,
+  "description": "Tests and README images for Draw on Notes, run against an Obsidian lookalike page in Chromium.",
+  "scripts": {
+    "test": "node build.js && node test.js",
+    "images": "node build.js && node capture.js"
+  },
+  "devDependencies": {
+    "gifenc": "1.0.3",
+    "lucide-static": "0.460.0",
+    "playwright": "^1.48.0",
+    "pngjs": "7.0.0"
+  }
+}
