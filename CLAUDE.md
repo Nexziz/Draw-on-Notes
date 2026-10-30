@@ -10,7 +10,7 @@ The support link is https://buymeacoffee.com/nexsiz (spelled "nexsiz", unlike th
 
 ## The plugin
 
-Plain JavaScript with no build step, like Pocket Watch: `main.js`, `styles.css` and `manifest.json` are what Obsidian loads. When releasing, bump the version in `manifest.json` and add it to `versions.json`.
+Plain JavaScript with no build step, like Pocket Watch: `main.js`, `styles.css` and `manifest.json` are what Obsidian loads. To release, bump the version in `manifest.json`, add it to `versions.json`, commit, and push a tag with the bare version (`0.2.0`, never `v0.2.0`). `.github/workflows/release.yml` then publishes a GitHub release with `main.js`, `manifest.json` and `styles.css`, which is what Obsidian installs from. The workflow fails if the tag and `manifest.json` disagree.
 
 ## Tests and images
 

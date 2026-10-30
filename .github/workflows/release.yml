@@ -1,0 +1,37 @@
+# Publishes a GitHub release with the files Obsidian installs, whenever a version tag is pushed.
+# Tag with the bare version from manifest.json, such as 0.1.0, never v0.1.0.
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches manifest.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="$(jq -r .version manifest.json)"
+          if [ "$tag" != "$version" ]; then
+            echo "The tag $tag doesn't match the version $version in manifest.json."
+            exit 1
+          fi
+          if [ "$(jq -r --arg v "$version" '.[$v] // empty' versions.json)" = "" ]; then
+            echo "versions.json has no entry for $version."
+            exit 1
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" --title "$tag" --generate-notes main.js manifest.json styles.css
