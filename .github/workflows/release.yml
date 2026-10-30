@@ -1,27 +1,37 @@
-# Publishes a GitHub release with the files Obsidian installs, whenever a version tag is pushed.
-# Tag with the bare version from manifest.json, such as 0.1.0, never v0.1.0.
+# Attaches the files Obsidian installs to the GitHub release for a version: when a version tag is
+# pushed, or when a release is made on GitHub (which pushes its tag), or by hand from the Actions
+# tab. Use the bare version from manifest.json, such as 0.1.0, never v0.1.0.
 name: Release
 
 on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version to release, such as 0.1.0
+        required: true
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Check the tag matches manifest.json
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
           version="$(jq -r .version manifest.json)"
-          if [ "$tag" != "$version" ]; then
-            echo "The tag $tag doesn't match the version $version in manifest.json."
+          if [ "$TAG" != "$version" ]; then
+            echo "The tag $TAG doesn't match the version $version in manifest.json."
             exit 1
           fi
           if [ "$(jq -r --arg v "$version" '.[$v] // empty' versions.json)" = "" ]; then
@@ -29,9 +39,12 @@ jobs:
             exit 1
           fi
 
-      - name: Publish the release
+      - name: Publish the release with its files
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" --title "$tag" --generate-notes main.js manifest.json styles.css
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes main.js manifest.json styles.css
+          fi
