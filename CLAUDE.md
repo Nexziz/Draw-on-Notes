@@ -10,7 +10,7 @@ The support link is https://buymeacoffee.com/nexsiz (spelled "nexsiz", unlike th
 
 ## The plugin
 
-Plain JavaScript with no build step, like Pocket Watch: `main.js`, `styles.css` and `manifest.json` are what Obsidian loads. To release, bump the version in `manifest.json`, add it to `versions.json`, commit, and push a tag with the bare version (`0.2.0`, never `v0.2.0`). `.github/workflows/release.yml` then publishes a GitHub release with `main.js`, `manifest.json` and `styles.css`, which is what Obsidian installs from. A release made by hand on GitHub works too: its tag starts the workflow, which attaches the files to it. To attach them again to an existing release, run the Release workflow from the Actions tab with its version. The workflow fails if the tag and `manifest.json` disagree.
+Plain JavaScript with no build step, like Pocket Watch: `main.js`, `styles.css` and `manifest.json` are what Obsidian loads. To release, bump the version in `manifest.json`, add it to `versions.json`, write a `## <version>` section at the top of `CHANGELOG.md` (it becomes the release notes), commit, and push a tag with the bare version (`0.2.0`, never `v0.2.0`). `.github/workflows/release.yml` then publishes a GitHub release with `main.js`, `manifest.json` and `styles.css`, which is what Obsidian installs from, signed with GitHub artifact attestations. A release made by hand on GitHub works too: its tag starts the workflow, which attaches the files to it. To attach them again to an existing release, run the Release workflow from the Actions tab with its version. The workflow fails if the tag and `manifest.json` disagree, or `CHANGELOG.md` has no section for the version.
 
 ## Tests and images
 
