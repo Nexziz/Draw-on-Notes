@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Layers.** A panel on the right while you draw: add layers, pick the one to draw on, hide, rename, reorder and delete them. The eraser and Clear work on the picked layer. Drawings from 0.1.0 open as Layer 1.
+- **Smoothing.** A slider that steadies your line as you draw.
+- **Straight lines.** Hold Shift while drawing for a straight line, snapped level, upright or diagonal when it's close.
+- **Colours show in every theme.** Some themes painted over the colour swatches; now they always show their colours.
+- **A cleaner toolbar,** with a preview of your brush, quieter borders in any theme, and a button for the layers panel.
+
 ## 0.1.0
 
 The first release. Mark up your notes by hand, right where you read them.

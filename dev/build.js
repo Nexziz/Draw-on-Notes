@@ -5,7 +5,7 @@ const path = require('path');
 const repo = path.join(__dirname, '..');
 const iconsDir = path.join(__dirname, 'node_modules/lucide-static/icons');
 const icons = {};
-for (const name of ['pencil', 'highlighter', 'eraser', 'undo-2', 'redo-2', 'trash-2', 'check', 'circle', 'circle-dot', 'droplet', 'coffee', 'ellipsis-vertical', 'book-open', 'file-text', 'search', 'folder', 'chevron-left', 'chevron-right']) {
+for (const name of ['pencil', 'highlighter', 'eraser', 'undo-2', 'redo-2', 'trash-2', 'check', 'circle', 'circle-dot', 'droplet', 'coffee', 'ellipsis-vertical', 'book-open', 'file-text', 'search', 'folder', 'chevron-left', 'chevron-right', 'waves', 'layers', 'eye', 'eye-off', 'plus', 'x', 'chevron-up', 'chevron-down']) {
   icons[name] = fs.readFileSync(path.join(iconsDir, name + '.svg'), 'utf8')
     .replace(/<!--[\s\S]*?-->/g, '').replace('class="lucide', 'class="svg-icon lucide');
 }
@@ -38,13 +38,13 @@ body.theme-light {
   --background-primary: #ffffff; --background-secondary: #f6f6f6; --background-modifier-border: #e3e3e3;
   --background-modifier-hover: rgba(0,0,0,0.06); --interactive-accent: #8a5cf5; --text-normal: #222;
   --text-muted: #6b6b6b; --icon-color: #5c5c5c; --shadow-l: 0 2px 10px rgba(0,0,0,0.12), 0 8px 30px rgba(0,0,0,0.1);
-  --tab-bg: #ececec; --ribbon: #f6f6f6; --heading: #1a1a1a;
+  --tab-bg: #ececec; --interactive-normal: #f2f2f2; --ribbon: #f6f6f6; --heading: #1a1a1a;
 }
 body.theme-dark {
   --background-primary: #1e1e1e; --background-secondary: #262626; --background-modifier-border: #363636;
   --background-modifier-hover: rgba(255,255,255,0.07); --interactive-accent: #a882ff; --text-normal: #dadada;
   --text-muted: #9a9a9a; --icon-color: #a3a3a3; --shadow-l: 0 2px 10px rgba(0,0,0,0.5), 0 8px 30px rgba(0,0,0,0.4);
-  --tab-bg: #161616; --ribbon: #262626; --heading: #f0f0f0;
+  --tab-bg: #161616; --interactive-normal: #363636; --ribbon: #262626; --heading: #f0f0f0;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -61,6 +61,9 @@ body { font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif; col
 .clickable-icon { display: flex; align-items: center; justify-content: center; padding: 4px 6px; border: none; border-radius: 6px; background: transparent; color: var(--icon-color); cursor: pointer; }
 .clickable-icon:hover { background: var(--background-modifier-hover); }
 button { font: inherit; }
+/* Obsidian's own button colours, which themes change: the swatches must show through them. */
+button:not(.clickable-icon) { background-color: var(--interactive-normal); box-shadow: 0 1px 2px rgba(0,0,0,0.2); padding: 4px 12px; border: none; border-radius: 6px; color: var(--text-normal); }
+input[type='color'] { background: transparent; border: none; padding: 0; }
 .view-content { flex: 1; min-height: 0; }
 .markdown-reading-view { height: 100%; }
 .markdown-preview-view { height: 100%; overflow-y: auto; padding: 0 32px 120px; font-size: 16px; line-height: 1.6; }

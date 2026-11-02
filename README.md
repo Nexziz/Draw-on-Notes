@@ -10,14 +10,17 @@ Mark up your notes by hand, right where you read them. Click the pen, draw over 
 - **The whole page is yours.** Your drawing sits on top of the note and reaches into the margins, so you can circle a line, underline a word, or scribble beside a paragraph.
 - **Quick marks while you review.** Tick off what's done, flag what needs another look, or draw an arrow, without leaving the note.
 - **A pen, a highlighter and an eraser.** The highlighter has a flat tip and lets the text show through crisply, in light and dark themes. The eraser lifts off any stroke it touches, and so does the eraser end of a stylus.
-- **Make the pen your own.** Seven colours, or any colour from the picker, and a size and transparency for each tool. Draw on Notes remembers them.
-- **Undo anything.** Undo and redo every stroke, erase and clear.
+- **Make the pen your own.** Seven colours, or any colour from the picker, and a size and opacity for each tool, with a preview of your brush. Draw on Notes remembers them.
+- **Smoothing** steadies a shaky hand, from none at all to silky curves.
+- **Straight lines.** Hold Shift while you draw for a straight line. It snaps level, upright or diagonal when you're close, for neat underlines.
+- **Layers.** A panel on the right lists your layers: add one, pick the one to draw on, hide it, rename it with a double-click, move it up or down, or delete it. The eraser and Clear work on the picked layer.
+- **Undo anything.** Undo and redo every stroke, erase, clear and layer change.
 - **Keep scrolling.** The mouse wheel still scrolls the note while you draw, and your marks scroll with it.
 - **Out of the way.** When you're not drawing, your marks stay on the page and clicks go through to the note as usual. You can hide them in the settings.
 
 ![Marking up a note](images/markup-demo.gif)
 
-![Changing colour, size and transparency](images/pen-settings.gif)
+![Changing colour, size and opacity](images/pen-settings.gif)
 
 ## Shortcuts
 
@@ -27,6 +30,8 @@ While drawing:
 | --- | --- |
 | <kbd>P</kbd> <kbd>H</kbd> <kbd>E</kbd> | Pen, highlighter, eraser |
 | <kbd>[</kbd> <kbd>]</kbd> | Smaller or bigger |
+| <kbd>L</kbd> | Show or hide layers |
+| Hold <kbd>Shift</kbd> | Straight line |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Undo |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Redo |
 | <kbd>Esc</kbd> | Stop drawing |

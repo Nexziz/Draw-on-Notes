@@ -145,6 +145,23 @@ function writeGif(file, frames) {
 }
 
 // The marks for the hero image and the markup demo.
+// Adds a layer from the panel on the right and names it.
+async function newLayer(page, name, snap) {
+  const plus = await rect(page, '.draw-on-notes-button[aria-label="New layer"]');
+  await glide(page, plus.x + plus.width / 2, plus.y + plus.height / 2, snap, 8);
+  await page.mouse.click(plus.x + plus.width / 2, plus.y + plus.height / 2);
+  if (snap) await snap(300);
+  const label = await rect(page, '.draw-on-notes-layer-row.is-active .draw-on-notes-layer-name');
+  await page.mouse.dblclick(label.x + 20, label.y + label.height / 2);
+  await page.keyboard.press('Control+a');
+  for (const ch of name) {
+    await page.keyboard.type(ch);
+    if (snap) await snap(60);
+  }
+  await page.keyboard.press('Enter');
+  if (snap) await snap(400);
+}
+
 async function markUp(page, snap) {
   const s = (pts, every) => stroke(page, pts, snap, every);
   await s(ellipse(await rect(page, '#t-eleven')));
@@ -157,6 +174,7 @@ async function markUp(page, snap) {
     const b = await rect(page, id);
     await s(check(b.x - 58, b.y + b.height / 2 - 2), 2);
   }
+  await newLayer(page, 'Questions', snap);
   await pick(page, 'Purple', snap);
   const li3 = await rect(page, '#t-li3');
   await s(question(li3.x - 44, li3.y + 2), 4);
@@ -210,7 +228,7 @@ async function markUp(page, snap) {
     const snap = recorder(page);
     await page.mouse.move(880, 200);
     await snap(600);
-    const y0 = 170;
+    const y0 = 240;
     const wave = (y) => line(862, y, 938, y, 16, 4);
     await stroke(page, wave(y0), snap, 4);
     await pick(page, 'Blue', snap);

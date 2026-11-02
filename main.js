@@ -30,7 +30,9 @@ const DEFAULT_SETTINGS = {
   pen: { color: '#e03131', size: 3, opacity: 100 },
   highlighter: { color: '#fab005', size: 18, opacity: 40 },
   eraserSize: 20,
+  smoothing: 30,
   showDrawings: true,
+  showLayers: true,
 };
 
 const MIN_SIZE = 1;
@@ -38,6 +40,8 @@ const MAX_SIZE = 40;
 const MIN_OPACITY = 5;
 const HISTORY = 100;
 const SAVE_DELAY = 600;
+// How close to level, upright or diagonal a straight line has to be to snap to it, in degrees.
+const SNAP_ANGLE = 5;
 
 // ---------------------------------------------------------------------------
 // Strokes
@@ -45,8 +49,8 @@ const SAVE_DELAY = 600;
 
 // A stroke is { tool, color, size, opacity, points: [x0, y0, x1, y1, ...] }. Points are in note
 // coordinates: x from the middle of the page, so marks stay beside their text when the pane is
-// resized, and y from the top of the note, so they scroll with it. Strokes are never changed in
-// place: drawing, erasing and clearing make a new list, and undo keeps the old one.
+// resized, and y from the top of the note, so they scroll with it. Strokes and layers are never
+// changed in place: drawing, erasing and every layer change make new ones, and undo keeps the old.
 
 const bounds = new WeakMap();
 
@@ -111,6 +115,20 @@ function touches(stroke, x, y, r) {
   return false;
 }
 
+// The end of a straight line from (x0, y0) towards (x, y), snapped to level, upright or diagonal
+// when it's close to one of them.
+function straightEnd(x0, y0, x, y) {
+  const length = Math.hypot(x - x0, y - y0);
+  const angle = Math.atan2(y - y0, x - x0);
+  const step = Math.PI / 4;
+  const snapped = Math.round(angle / step) * step;
+  if (Math.abs(angle - snapped) > (SNAP_ANGLE * Math.PI) / 180) return [x, y];
+  return [
+    Math.round((x0 + Math.cos(snapped) * length) * 10) / 10,
+    Math.round((y0 + Math.sin(snapped) * length) * 10) / 10,
+  ];
+}
+
 // A round cursor the size of the eraser.
 function eraserCursor(size) {
   const d = Math.max(8, Math.min(120, Math.round(size)));
@@ -118,6 +136,42 @@ function eraserCursor(size) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d + 2}" height="${d + 2}">`
     + `<circle cx="${c}" cy="${c}" r="${d / 2}" fill="rgba(255,255,255,0.35)" stroke="black" stroke-width="1"/></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, cell`;
+}
+
+// ---------------------------------------------------------------------------
+// Layers
+// ---------------------------------------------------------------------------
+
+// A note's drawing in one view mode is { layers, active }: layers from the back to the front, each
+// { id, name, visible, strokes }, and the id of the layer being drawn on.
+
+function newLayer(name, strokes) {
+  return { id: Math.random().toString(36).slice(2, 10), name, visible: true, strokes: strokes || [] };
+}
+
+function emptyDrawing() {
+  return { layers: [newLayer('Layer 1')], active: null };
+}
+
+// Version 0.1.0 kept one list of strokes per note, which becomes its first layer.
+function readDrawing(saved) {
+  if (Array.isArray(saved)) return { layers: [newLayer('Layer 1', saved)], active: null };
+  if (saved && Array.isArray(saved.layers) && saved.layers.length) return saved;
+  return emptyDrawing();
+}
+
+function nextLayerName(layers) {
+  let n = layers.length;
+  for (const layer of layers) {
+    const m = /^Layer (\d+)$/.exec(layer.name);
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  return `Layer ${n + 1}`;
+}
+
+// Whether a drawing is just the empty layer every note starts with, and needn't be saved.
+function isBlank(layers) {
+  return layers.length === 1 && !layers[0].strokes.length && layers[0].visible && layers[0].name === 'Layer 1';
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +186,10 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
     s.highlighter = Object.assign({}, DEFAULT_SETTINGS.highlighter, s.highlighter);
     if (!TOOLS[s.tool]) s.tool = DEFAULT_SETTINGS.tool;
     this.settings = s;
-    // Drawings by note path, with one layer for Reading view and one for Editing view, since the
-    // same note is laid out differently in each.
+    // Drawings by note path, with one for Reading view and one for Editing view, since the same
+    // note is laid out differently in each.
     this.drawings = saved.drawings || {};
-    this.layers = new Map();
+    this.surfaces = new Map();
     this.saveTimer = null;
 
     this.addSettingTab(new DrawOnNotesSettingTab(this.app, this));
@@ -154,9 +208,9 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
       name: 'Start or stop drawing on this note',
       icon: 'pencil',
       checkCallback: (checking) => {
-        const layer = this.activeLayer();
-        if (!layer || !layer.path) return false;
-        if (!checking) layer.toggle();
+        const surface = this.activeSurface();
+        if (!surface || !surface.path) return false;
+        if (!checking) surface.toggle();
         return true;
       },
     });
@@ -165,9 +219,9 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
       name: 'Clear the drawings on this note',
       icon: 'trash-2',
       checkCallback: (checking) => {
-        const layer = this.activeLayer();
-        if (!layer || !layer.strokes.length) return false;
-        if (!checking) layer.clear();
+        const surface = this.activeSurface();
+        if (!surface || !surface.strokeCount()) return false;
+        if (!checking) surface.clearAll();
         return true;
       },
     });
@@ -183,8 +237,8 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
   }
 
   onunload() {
-    for (const layer of [...this.layers.values()]) layer.destroy();
-    this.layers.clear();
+    for (const surface of [...this.surfaces.values()]) surface.destroy();
+    this.surfaces.clear();
     if (this.saveTimer) this.saveNow();
   }
 
@@ -192,40 +246,40 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
       if (!(view instanceof MarkdownView)) continue;
-      let layer = this.layers.get(view);
-      if (!layer) {
-        layer = new NoteLayer(this, view);
-        this.layers.set(view, layer);
+      let surface = this.surfaces.get(view);
+      if (!surface) {
+        surface = new DrawingSurface(this, view);
+        this.surfaces.set(view, surface);
         view.register(() => {
-          layer.destroy();
-          this.layers.delete(view);
+          surface.destroy();
+          this.surfaces.delete(view);
         });
       }
-      layer.sync();
+      surface.sync();
     }
   }
 
-  activeLayer() {
+  activeSurface() {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    return (view && this.layers.get(view)) || null;
+    return (view && this.surfaces.get(view)) || null;
   }
 
-  strokesFor(path, mode) {
+  drawingFor(path, mode) {
     const entry = path && this.drawings[path];
-    return (entry && entry[mode]) || [];
+    return readDrawing(entry && entry[mode]);
   }
 
-  // Stores a layer's strokes and refreshes any other pane showing the same note.
-  storeStrokes(layer) {
-    const { path, mode, strokes } = layer;
+  // Stores a surface's drawing and refreshes any other pane showing the same note.
+  storeDrawing(surface) {
+    const { path, mode, layers, activeId } = surface;
     if (!path) return;
     const entry = this.drawings[path] || {};
-    if (strokes.length) entry[mode] = strokes;
-    else delete entry[mode];
+    if (isBlank(layers)) delete entry[mode];
+    else entry[mode] = { layers, active: activeId };
     if (entry.preview || entry.source) this.drawings[path] = entry;
     else delete this.drawings[path];
-    for (const other of this.layers.values()) {
-      if (other !== layer && other.path === path && other.mode === mode) other.reload();
+    for (const other of this.surfaces.values()) {
+      if (other !== surface && other.path === path && other.mode === mode) other.reload();
     }
     this.requestSave();
   }
@@ -241,16 +295,22 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
       delete this.drawings[path];
       changed = true;
     }
-    for (const layer of this.layers.values()) {
-      const next = layer.path && moved(layer.path);
-      if (next) layer.path = next;
+    for (const surface of this.surfaces.values()) {
+      const next = surface.path && moved(surface.path);
+      if (next) surface.path = next;
     }
     if (changed) this.requestSave();
   }
 
   setShowDrawings(show) {
     this.settings.showDrawings = show;
-    for (const layer of this.layers.values()) layer.updateVisibility();
+    for (const surface of this.surfaces.values()) surface.updateVisibility();
+    this.requestSave();
+  }
+
+  setShowLayers(show) {
+    this.settings.showLayers = show;
+    this.refreshToolbars();
     this.requestSave();
   }
 
@@ -266,21 +326,22 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
   }
 
   onKeyDown(e) {
-    const layer = this.activeLayer();
-    if (!layer || !layer.drawing) return;
+    const surface = this.activeSurface();
+    if (!surface || !surface.drawing) return;
     const target = e.target;
     if (target instanceof HTMLInputElement && target.type !== 'range' && target.type !== 'color') return;
     if (target instanceof HTMLTextAreaElement) return;
     const key = e.key.toLowerCase();
     const mod = e.ctrlKey || e.metaKey;
     let done = true;
-    if (key === 'escape') layer.stop();
-    else if (mod && key === 'z' && !e.shiftKey) layer.undo();
-    else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) layer.redo();
+    if (key === 'escape') surface.stop();
+    else if (mod && key === 'z' && !e.shiftKey) surface.undo();
+    else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) surface.redo();
     else if (mod || e.altKey) done = false;
     else if (key === 'p') this.setTool('pen');
     else if (key === 'h') this.setTool('highlighter');
     else if (key === 'e') this.setTool('eraser');
+    else if (key === 'l') this.setShowLayers(!this.settings.showLayers);
     else if (key === '[') this.changeSize(-1);
     else if (key === ']') this.changeSize(1);
     else done = false;
@@ -299,6 +360,7 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
   // Sets the colour, size or opacity of the pen or highlighter in use.
   setStyle(change) {
     Object.assign(this.settings[this.settings.tool], change);
+    for (const surface of this.surfaces.values()) surface.updatePreview();
     this.requestSave();
   }
 
@@ -306,7 +368,15 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
     size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
     if (this.settings.tool === 'eraser') this.settings.eraserSize = size;
     else this.settings[this.settings.tool].size = size;
-    for (const layer of this.layers.values()) layer.updateCursor();
+    for (const surface of this.surfaces.values()) {
+      surface.updateCursor();
+      surface.updatePreview();
+    }
+    this.requestSave();
+  }
+
+  setSmoothing(smoothing) {
+    this.settings.smoothing = Math.max(0, Math.min(100, smoothing));
     this.requestSave();
   }
 
@@ -319,25 +389,29 @@ module.exports = class DrawOnNotesPlugin extends Plugin {
   }
 
   refreshToolbars() {
-    for (const layer of this.layers.values()) {
-      if (layer.drawing) layer.buildToolbar();
-      layer.updateCursor();
+    for (const surface of this.surfaces.values()) {
+      if (surface.drawing) {
+        surface.buildToolbar();
+        surface.buildLayersPanel();
+      }
+      surface.updateCursor();
     }
   }
 };
 
 // ---------------------------------------------------------------------------
-// The drawing layer over one note
+// The drawing surface over one note
 // ---------------------------------------------------------------------------
 
-class NoteLayer {
+class DrawingSurface {
   constructor(plugin, view) {
     this.plugin = plugin;
     this.view = view;
     this.drawing = false;
     this.path = null;
     this.mode = null;
-    this.strokes = [];
+    this.layers = [];
+    this.activeId = null;
     this.undoStack = [];
     this.redoStack = [];
     this.scroller = null;
@@ -345,6 +419,8 @@ class NoteLayer {
     this.erasing = null;
     this.pointer = null;
     this.toolbar = null;
+    this.panel = null;
+    this.preview = null;
     this.frame = 0;
     this.destroyed = false;
 
@@ -403,12 +479,16 @@ class NoteLayer {
   }
 
   reload() {
-    this.strokes = this.plugin.strokesFor(this.path, this.mode);
+    const drawing = this.plugin.drawingFor(this.path, this.mode);
+    this.layers = drawing.layers;
+    this.activeId = drawing.active;
+    this.fixActive();
     this.undoStack = [];
     this.redoStack = [];
     this.current = null;
     this.erasing = null;
     this.updateHistoryButtons();
+    this.buildLayersPanel();
     this.updateVisibility();
     this.schedule();
   }
@@ -419,6 +499,12 @@ class NoteLayer {
       ? root.querySelector('.markdown-reading-view .markdown-preview-view')
       : root.querySelector('.markdown-source-view .cm-scroller');
     return scroller || root;
+  }
+
+  strokeCount(visibleOnly) {
+    let n = 0;
+    for (const layer of this.layers) if (layer.visible || !visibleOnly) n += layer.strokes.length;
+    return n;
   }
 
   toggle() {
@@ -439,13 +525,14 @@ class NoteLayer {
     this.button.addClass('is-active');
     this.button.setAttribute('aria-label', 'Stop drawing');
     this.buildToolbar();
+    this.buildLayersPanel();
     this.updateVisibility();
     this.updateCursor();
   }
 
   stop() {
     if (this.current) this.finishStroke();
-    if (this.erasing && this.erasing.before !== this.strokes) this.commit(this.erasing.before);
+    if (this.erasing && this.erasing.before !== this.layers) this.commit(this.erasing.before);
     this.drawing = false;
     this.pointer = null;
     this.erasing = null;
@@ -453,11 +540,13 @@ class NoteLayer {
     this.button.setAttribute('aria-label', 'Draw on note');
     if (this.toolbar) this.toolbar.remove();
     this.toolbar = null;
+    this.preview = null;
+    this.buildLayersPanel();
     this.updateVisibility();
   }
 
   updateVisibility() {
-    const show = this.drawing || (this.plugin.settings.showDrawings && this.strokes.length > 0);
+    const show = this.drawing || (this.plugin.settings.showDrawings && this.strokeCount(true) > 0);
     this.el.toggleClass('is-drawing', this.drawing);
     this.el.toggle(show);
     // A hidden layer has no size, so it measures itself again when it shows.
@@ -478,59 +567,95 @@ class NoteLayer {
     const plugin = this.plugin;
     const s = plugin.settings;
     const bar = this.toolbar = this.el.createDiv('draw-on-notes-toolbar');
-    const button = (icon, label, onClick, cls) => {
-      const b = bar.createEl('button', { cls: 'clickable-icon draw-on-notes-button', attr: { 'aria-label': label } });
+    const group = () => bar.createDiv('draw-on-notes-group');
+    const button = (parent, icon, label, onClick, cls) => {
+      const b = parent.createEl('button', { cls: 'clickable-icon draw-on-notes-button', attr: { 'aria-label': label } });
       if (cls) b.addClass(cls);
       setIcon(b, icon);
       b.addEventListener('click', onClick);
       return b;
     };
-    const divider = () => bar.createDiv('draw-on-notes-divider');
-    const slider = (icon, label, min, max, value, onInput) => {
-      const wrap = bar.createEl('label', { cls: 'draw-on-notes-slider', attr: { 'aria-label': label } });
+    const slider = (parent, icon, label, min, max, value, unit, onInput) => {
+      const wrap = parent.createEl('label', { cls: 'draw-on-notes-slider' });
+      const title = (v) => `${label}: ${v}${unit}`;
+      wrap.setAttribute('aria-label', title(value));
       setIcon(wrap.createSpan('draw-on-notes-slider-icon'), icon);
       const input = wrap.createEl('input', { type: 'range', attr: { min, max, step: 1 } });
       input.value = String(value);
-      input.addEventListener('input', () => onInput(Number(input.value)));
+      input.addEventListener('input', () => {
+        wrap.setAttribute('aria-label', title(input.value));
+        onInput(Number(input.value));
+      });
     };
 
+    const tools = group();
     for (const [key, tool] of Object.entries(TOOLS)) {
-      button(tool.icon, `${tool.name} (${tool.key})`, () => plugin.setTool(key), s.tool === key && 'is-active');
+      button(tools, tool.icon, `${tool.name} (${tool.key})`, () => plugin.setTool(key), s.tool === key && 'is-active');
     }
-    divider();
 
     if (s.tool === 'eraser') {
-      slider('circle', 'Eraser size ([ and ])', MIN_SIZE, MAX_SIZE, s.eraserSize, (v) => plugin.setSize(v));
+      slider(group(), 'circle', 'Eraser size', MIN_SIZE, MAX_SIZE, s.eraserSize, '', (v) => plugin.setSize(v));
     } else {
       const style = s[s.tool];
-      const swatches = bar.createDiv('draw-on-notes-swatches');
+      // Swatches are plain elements, not buttons, so a theme's button colours can't cover them.
+      const swatches = group();
+      swatches.addClass('draw-on-notes-swatches');
       const custom = !PALETTE.some((p) => p.color === style.color);
-      for (const { name, color } of PALETTE) {
-        const swatch = swatches.createEl('button', { cls: 'draw-on-notes-swatch', attr: { 'aria-label': name } });
-        swatch.style.setProperty('--draw-on-notes-swatch', color);
-        if (color === style.color) swatch.addClass('is-active');
-        swatch.addEventListener('click', () => {
+      const choose = (el, color) => {
+        const pick = () => {
           plugin.setStyle({ color });
           plugin.refreshToolbars();
+        };
+        el.addEventListener('click', pick);
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            pick();
+          }
         });
+      };
+      for (const { name, color } of PALETTE) {
+        const swatch = swatches.createDiv({ cls: 'draw-on-notes-swatch', attr: { role: 'button', tabindex: 0, 'aria-label': name } });
+        swatch.style.setProperty('--draw-on-notes-swatch', color);
+        if (color === style.color) swatch.addClass('is-active');
+        choose(swatch, color);
       }
       const picker = swatches.createEl('input', { cls: 'draw-on-notes-picker', type: 'color', attr: { 'aria-label': 'Any colour' } });
       if (custom) picker.addClass('is-active');
       picker.value = style.color;
       picker.addEventListener('input', () => plugin.setStyle({ color: picker.value }));
       picker.addEventListener('change', () => plugin.refreshToolbars());
-      divider();
-      slider('circle-dot', 'Size ([ and ])', MIN_SIZE, MAX_SIZE, style.size, (v) => plugin.setSize(v));
-      slider('droplet', 'Transparency', MIN_OPACITY, 100, style.opacity, (v) => plugin.setStyle({ opacity: v }));
-    }
-    divider();
 
-    this.undoButton = button('undo-2', 'Undo (Ctrl+Z)', () => this.undo());
-    this.redoButton = button('redo-2', 'Redo (Ctrl+Shift+Z)', () => this.redo());
-    button('trash-2', 'Clear this note', () => this.clear());
-    divider();
-    button('check', 'Done (Esc)', () => this.stop(), 'draw-on-notes-done');
+      const brush = group();
+      brush.addClass('draw-on-notes-brush');
+      this.preview = brush.createDiv({ cls: 'draw-on-notes-preview', attr: { 'aria-label': 'Your brush' } }).createDiv('draw-on-notes-preview-dot');
+      this.updatePreview();
+      slider(brush, 'circle-dot', 'Size', MIN_SIZE, MAX_SIZE, style.size, '', (v) => plugin.setSize(v));
+      slider(brush, 'droplet', 'Opacity', MIN_OPACITY, 100, style.opacity, '%', (v) => plugin.setStyle({ opacity: v }));
+      slider(brush, 'waves', 'Smoothing', 0, 100, s.smoothing, '%', (v) => plugin.setSmoothing(v));
+    }
+
+    const history = group();
+    this.undoButton = button(history, 'undo-2', 'Undo (Ctrl+Z)', () => this.undo());
+    this.redoButton = button(history, 'redo-2', 'Redo (Ctrl+Shift+Z)', () => this.redo());
+    button(history, 'trash-2', 'Clear this layer', () => this.clearLayer());
+
+    const end = group();
+    button(end, 'layers', 'Layers (L)', () => plugin.setShowLayers(!s.showLayers), s.showLayers && 'is-active');
+    button(end, 'check', 'Done (Esc)', () => this.stop(), 'draw-on-notes-done');
     this.updateHistoryButtons();
+  }
+
+  updatePreview() {
+    if (!this.preview) return;
+    const s = this.plugin.settings;
+    if (s.tool === 'eraser') return;
+    const style = s[s.tool];
+    const d = Math.max(4, Math.min(24, style.size));
+    this.preview.style.setProperty('--draw-on-notes-preview-color', style.color);
+    this.preview.style.setProperty('--draw-on-notes-preview-size', `${d}px`);
+    this.preview.style.setProperty('--draw-on-notes-preview-opacity', String(style.opacity / 100));
+    this.preview.toggleClass('is-highlighter', s.tool === 'highlighter');
   }
 
   updateHistoryButtons() {
@@ -540,10 +665,154 @@ class NoteLayer {
   }
 
   // -------------------------------------------------------------------------
+  // Layers panel, on the right while drawing
+  // -------------------------------------------------------------------------
+
+  buildLayersPanel() {
+    if (this.panel) this.panel.remove();
+    this.panel = null;
+    if (!this.drawing || !this.plugin.settings.showLayers || this.destroyed) return;
+    const panel = this.panel = this.el.createDiv('draw-on-notes-layers');
+    const button = (parent, icon, label, onClick, cls) => {
+      const b = parent.createEl('button', { cls: 'clickable-icon draw-on-notes-button', attr: { 'aria-label': label } });
+      if (cls) b.addClass(cls);
+      setIcon(b, icon);
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onClick();
+      });
+      return b;
+    };
+
+    const head = panel.createDiv('draw-on-notes-layers-head');
+    head.createDiv({ cls: 'draw-on-notes-layers-title', text: 'Layers' });
+    button(head, 'plus', 'New layer', () => this.addLayer());
+    button(head, 'x', 'Hide layers (L)', () => this.plugin.setShowLayers(false));
+
+    const list = panel.createDiv('draw-on-notes-layers-list');
+    const top = this.layers.length - 1;
+    // The front layer is listed first.
+    for (let i = top; i >= 0; i--) {
+      const layer = this.layers[i];
+      const row = list.createDiv({ cls: 'draw-on-notes-layer-row', attr: { role: 'button', tabindex: 0, 'data-layer': layer.id } });
+      row.toggleClass('is-active', layer.id === this.activeId);
+      row.toggleClass('is-hidden', !layer.visible);
+      button(row, layer.visible ? 'eye' : 'eye-off', layer.visible ? 'Hide layer' : 'Show layer', () => this.toggleLayer(layer.id), 'draw-on-notes-eye');
+      const name = row.createDiv({ cls: 'draw-on-notes-layer-name', text: layer.name, attr: { 'aria-label': 'Double-click to rename' } });
+      const n = layer.strokes.length;
+      row.createDiv({ cls: 'draw-on-notes-layer-count', text: String(n), attr: { 'aria-label': n === 1 ? '1 stroke' : `${n} strokes` } });
+      const actions = row.createDiv('draw-on-notes-layer-actions');
+      button(actions, 'chevron-up', 'Move up', () => this.moveLayer(layer.id, 1)).disabled = i === top;
+      button(actions, 'chevron-down', 'Move down', () => this.moveLayer(layer.id, -1)).disabled = i === 0;
+      button(actions, 'trash-2', 'Delete layer', () => this.deleteLayer(layer.id)).disabled = this.layers.length === 1;
+      row.addEventListener('click', () => this.selectLayer(layer.id));
+      row.addEventListener('keydown', (e) => {
+        if (e.target === row && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          this.selectLayer(layer.id);
+        }
+      });
+      name.addEventListener('dblclick', () => this.renameLayer(layer.id, name));
+    }
+  }
+
+  fixActive() {
+    if (!this.layers.some((l) => l.id === this.activeId)) this.activeId = this.layers[this.layers.length - 1].id;
+  }
+
+  activeLayer() {
+    return this.layers.find((l) => l.id === this.activeId);
+  }
+
+  // Changes one layer, as one undo step.
+  updateLayer(id, change) {
+    this.change(this.layers.map((l) => (l.id === id ? Object.assign({}, l, change(l)) : l)));
+  }
+
+  // Picking a layer to draw on isn't a change to undo, so the panel just marks it.
+  selectLayer(id) {
+    if (id === this.activeId) return;
+    this.activeId = id;
+    this.plugin.storeDrawing(this);
+    if (this.panel) {
+      for (const row of this.panel.querySelectorAll('.draw-on-notes-layer-row')) {
+        row.toggleClass('is-active', row.getAttribute('data-layer') === id);
+      }
+    }
+  }
+
+  addLayer() {
+    const layer = newLayer(nextLayerName(this.layers));
+    const at = this.layers.indexOf(this.activeLayer()) + 1;
+    const layers = this.layers.slice();
+    layers.splice(at, 0, layer);
+    this.activeId = layer.id;
+    this.change(layers);
+  }
+
+  deleteLayer(id) {
+    if (this.layers.length <= 1) return;
+    const at = this.layers.findIndex((l) => l.id === id);
+    const layers = this.layers.filter((l) => l.id !== id);
+    if (id === this.activeId) this.activeId = layers[Math.max(0, at - 1)].id;
+    this.change(layers);
+    new Notice('Layer deleted. Undo brings it back.');
+  }
+
+  // Moves a layer one step towards the front (1) or the back (-1).
+  moveLayer(id, step) {
+    const at = this.layers.findIndex((l) => l.id === id);
+    const to = at + step;
+    if (at < 0 || to < 0 || to >= this.layers.length) return;
+    const layers = this.layers.slice();
+    [layers[at], layers[to]] = [layers[to], layers[at]];
+    this.change(layers);
+  }
+
+  toggleLayer(id) {
+    this.updateLayer(id, (l) => ({ visible: !l.visible }));
+  }
+
+  renameLayer(id, nameEl) {
+    const layer = this.layers.find((l) => l.id === id);
+    if (!layer) return;
+    const input = nameEl.ownerDocument.createElement('input');
+    input.className = 'draw-on-notes-layer-input';
+    input.type = 'text';
+    input.value = layer.name;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      if (save && name && name !== layer.name) this.updateLayer(id, () => ({ name }));
+      else this.buildLayersPanel();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  // -------------------------------------------------------------------------
   // History
   // -------------------------------------------------------------------------
 
-  // Keeps the strokes as they were before a change, for undo, and stores the new ones.
+  // Makes new layers the current ones, as one undo step.
+  change(layers) {
+    const before = this.layers;
+    this.layers = layers;
+    this.fixActive();
+    this.commit(before);
+  }
+
+  // Keeps the layers as they were before a change, for undo, and stores the new ones.
   commit(before) {
     this.undoStack.push(before);
     if (this.undoStack.length > HISTORY) this.undoStack.shift();
@@ -552,31 +821,39 @@ class NoteLayer {
   }
 
   changed() {
-    this.plugin.storeStrokes(this);
+    this.plugin.storeDrawing(this);
     this.updateHistoryButtons();
+    this.buildLayersPanel();
     this.updateVisibility();
     this.schedule();
   }
 
   undo() {
     if (!this.undoStack.length) return;
-    this.redoStack.push(this.strokes);
-    this.strokes = this.undoStack.pop();
+    this.redoStack.push(this.layers);
+    this.layers = this.undoStack.pop();
+    this.fixActive();
     this.changed();
   }
 
   redo() {
     if (!this.redoStack.length) return;
-    this.undoStack.push(this.strokes);
-    this.strokes = this.redoStack.pop();
+    this.undoStack.push(this.layers);
+    this.layers = this.redoStack.pop();
+    this.fixActive();
     this.changed();
   }
 
-  clear() {
-    if (!this.strokes.length) return;
-    const before = this.strokes;
-    this.strokes = [];
-    this.commit(before);
+  clearLayer() {
+    const layer = this.activeLayer();
+    if (!layer || !layer.strokes.length) return;
+    this.updateLayer(layer.id, () => ({ strokes: [] }));
+    new Notice(`${layer.name} cleared. Undo brings it back.`);
+  }
+
+  clearAll() {
+    if (!this.strokeCount()) return;
+    this.change(this.layers.map((l) => (l.strokes.length ? Object.assign({}, l, { strokes: [] }) : l)));
     new Notice('Drawings cleared. Undo brings them back.');
   }
 
@@ -615,11 +892,14 @@ class NoteLayer {
     // The eraser end of a stylus erases whatever tool is picked.
     const tool = e.buttons & 32 ? 'eraser' : s.tool;
     if (tool === 'eraser') {
-      this.erasing = { before: this.strokes, size: s.eraserSize };
+      this.erasing = { before: this.layers, size: s.eraserSize };
       this.eraseAt([e]);
     } else {
       const style = s[tool];
       this.current = { tool, color: style.color, size: style.size, opacity: style.opacity, points: [] };
+      // Up to 90% of each new point is the last one, which steadies a shaky hand.
+      this.smoothing = (s.smoothing / 100) * 0.9;
+      this.raw = null;
       this.addPoints([e]);
     }
   }
@@ -638,7 +918,7 @@ class NoteLayer {
     if (this.erasing) {
       const { before } = this.erasing;
       this.erasing = null;
-      if (before !== this.strokes) this.commit(before);
+      if (before !== this.layers) this.commit(before);
     } else if (this.current) {
       this.finishStroke();
     }
@@ -649,9 +929,27 @@ class NoteLayer {
     const p = this.current.points;
     for (const e of events) {
       const [x, y] = this.toNote(e, o);
+      this.raw = [x, y];
+      // Holding Shift draws a straight line from where the stroke started.
+      if (e.shiftKey && p.length) {
+        const [ex, ey] = straightEnd(p[0], p[1], x, y);
+        p.length = 2;
+        if (ex !== p[0] || ey !== p[1]) p.push(ex, ey);
+        this.current.straight = true;
+        continue;
+      }
+      if (!p.length) {
+        p.push(x, y);
+        continue;
+      }
+      const lx = p[p.length - 2];
+      const ly = p[p.length - 1];
+      const k = this.current.straight ? 0 : this.smoothing;
+      const sx = Math.round((lx + (x - lx) * (1 - k)) * 10) / 10;
+      const sy = Math.round((ly + (y - ly) * (1 - k)) * 10) / 10;
       // Skip points that barely moved, to keep saved drawings small.
-      if (p.length && Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) < 0.75) continue;
-      p.push(x, y);
+      if (Math.hypot(sx - lx, sy - ly) < 0.75) continue;
+      p.push(sx, sy);
     }
     this.schedule();
   }
@@ -659,22 +957,31 @@ class NoteLayer {
   finishStroke() {
     const stroke = this.current;
     this.current = null;
-    if (!stroke.points.length) return;
-    const before = this.strokes;
-    this.strokes = before.concat([stroke]);
-    this.commit(before);
+    const p = stroke.points;
+    if (!p.length) return;
+    // Smoothing trails behind the pen, so the stroke catches up to where it was lifted.
+    if (!stroke.straight && this.raw && p.length > 2) {
+      const [x, y] = this.raw;
+      if (Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) >= 0.75) p.push(x, y);
+    }
+    delete stroke.straight;
+    // Drawing on a hidden layer shows it, so the stroke doesn't vanish.
+    this.updateLayer(this.activeId, (l) => ({ visible: true, strokes: l.strokes.concat([stroke]) }));
   }
 
+  // The eraser works on the layer being drawn on.
   eraseAt(events) {
+    const layer = this.activeLayer();
+    if (!layer || !layer.visible) return;
     const o = this.origin();
     const r = this.erasing.size / 2;
-    let strokes = this.strokes;
+    let strokes = layer.strokes;
     for (const e of events) {
       const [x, y] = this.toNote(e, o);
       strokes = strokes.filter((stroke) => !touches(stroke, x, y, r));
     }
-    if (strokes.length !== this.strokes.length) {
-      this.strokes = strokes;
+    if (strokes.length !== layer.strokes.length) {
+      this.layers = this.layers.map((l) => (l === layer ? Object.assign({}, l, { strokes }) : l));
       this.schedule();
     }
   }
@@ -729,16 +1036,19 @@ class NoteLayer {
     const top = -o.y;
     const bottom = top + this.el.clientHeight;
     for (const ctx of [marker, pen]) ctx.setTransform(dpr, 0, 0, dpr, o.x * dpr, o.y * dpr);
-    const all = this.current ? this.strokes.concat([this.current]) : this.strokes;
-    for (const stroke of all) {
-      if (!stroke.points.length) continue;
-      const b = boundsOf(stroke);
-      const pad = stroke.size;
-      // Live strokes keep growing, so their cached bounds can't be trusted yet.
-      if (stroke !== this.current && (b.bottom + pad < top || b.top - pad > bottom)) continue;
-      paintStroke(stroke.tool === 'highlighter' ? marker : pen, stroke);
+    const paint = (stroke) => paintStroke(stroke.tool === 'highlighter' ? marker : pen, stroke);
+    // Layers from the back to the front.
+    for (const layer of this.layers) {
+      if (!layer.visible) continue;
+      for (const stroke of layer.strokes) {
+        if (!stroke.points.length) continue;
+        const b = boundsOf(stroke);
+        if (b.bottom + stroke.size < top || b.top - stroke.size > bottom) continue;
+        paint(stroke);
+      }
     }
-    if (this.current) bounds.delete(this.current);
+    // The stroke being drawn keeps growing, so it is painted without bounds to go stale.
+    if (this.current && this.current.points.length) paint(this.current);
   }
 }
 
@@ -777,7 +1087,9 @@ class DrawOnNotesSettingTab extends PluginSettingTab {
       ['P', 'Pen'],
       ['H', 'Highlighter'],
       ['E', 'Eraser'],
+      ['L', 'Show or hide layers'],
       ['[  ]', 'Smaller or bigger'],
+      ['Shift', 'Hold for a straight line'],
       ['Ctrl+Z', 'Undo'],
       ['Ctrl+Shift+Z', 'Redo'],
       ['Esc', 'Stop drawing'],
@@ -812,7 +1124,7 @@ class DrawOnNotesSettingTab extends PluginSettingTab {
           }
           window.clearTimeout(armed);
           plugin.drawings = {};
-          for (const layer of plugin.layers.values()) layer.reload();
+          for (const surface of plugin.surfaces.values()) surface.reload();
           plugin.requestSave();
           new Notice('All drawings deleted.');
           this.display();
